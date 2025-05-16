@@ -1,0 +1,13 @@
+{
+  "project_root": "./code",
+  "logistics_path": "./test_results/logistics.csv",
+  "expected_output_file": "objective.csv",
+  "result_root": "./test_results",
+  "simple_dir": "sim",
+  "medium_dir": "med",
+  "hard_dir": "hard",
+  "transport_pbf_path": "./data/safegraph_dataset/Transportation/planet_-71.123,42.2434_-70.8728,42.3814.osm.pbf",
+  "poi_spend_path": "./data/safegraph_dataset/Boston_POI_Spend_with_zones.csv",
+  "parking_path": "./data/safegraph_dataset/Massachusetts_Parking.csv",
+  "population_dir": "./data/safegraph_dataset/Population/Massachusetts"
+}
