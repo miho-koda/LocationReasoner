@@ -92,8 +92,14 @@ def _strip_code_fences(text: str) -> str:
 
 
 def _spec_system_prompt() -> str:
-    count_cols = ", ".join(CACHE.get("count_columns") or [])
-    dist_cols = ", ".join(CACHE.get("distance_columns") or [])
+    cols = list(CACHE.get("features").columns) if CACHE.get("features") is not None else []
+    count_cols   = ", ".join(c for c in cols if c.startswith("cnt_"))
+    dist_cols    = ", ".join(c for c in cols if c.startswith("dist_to_"))
+    spend_cols   = ", ".join(c for c in cols if c.startswith("spend_"))
+    parking_cols = ", ".join(c for c in cols if "parking" in c)
+    transit_cols = ", ".join(c for c in cols if c in ("cnt_bus_stops", "cnt_subway_entrances"))
+    pop_col      = "population" if "population" in cols else ""
+
     return (
         "You convert natural language site-selection queries into JSON rule specs.\n\n"
         "Return ONLY a valid JSON object with this structure:\n"
@@ -101,14 +107,28 @@ def _spec_system_prompt() -> str:
         "- Use 'any_of' for OR conditions (array of clauses)\n"
         "- Use 'not' for exclusions (array of clauses to exclude)\n"
         "- Leaf clause: {\"metric\": \"column_name\", \"op\": \"operator\", \"value\": number}\n\n"
-        "Operators: ==, !=, <, <=, >, >=, in, not_in\n\n"
-        f"Available count metrics: {count_cols}\n"
-        f"Available distance metrics (meters): {dist_cols}\n\n"
-        "Guidelines:\n"
-        "- 'no X' means cnt_X == 0\n"
-        "- 'at least N' means >= N\n"
-        "- 'no more than N' means <= N\n"
-        "- 'within D meters' means <= D\n\n"
+        "Operators: ==, !=, <, <=, >, >=\n\n"
+        "Available metrics by category:\n"
+        f"POI counts (integer):     {count_cols}\n"
+        f"Distance (meters):        {dist_cols}\n"
+        f"Spending (2023 USD):      {spend_cols}\n"
+        f"Parking:                  {parking_cols}\n"
+        f"Transit:                  {transit_cols}\n"
+        f"Population:               {pop_col}\n\n"
+        "Mapping guidelines:\n"
+        "- 'no X' or 'without X'          → cnt_X == 0\n"
+        "- 'at least N X'                 → cnt_X >= N\n"
+        "- 'no more than N X'             → cnt_X <= N\n"
+        "- 'within D meters of X'         → dist_to_X_m <= D\n"
+        "- 'total spend over $N'          → spend_total >= N\n"
+        "- 'median spend per transaction' → spend_median_per_txn\n"
+        "- 'number of transactions'       → spend_num_transactions\n"
+        "- 'number of customers'          → spend_num_customers\n"
+        "- 'parking lots / parking'       → cnt_parking\n"
+        "- 'parking capacity / spaces'    → parking_capacity\n"
+        "- 'bus stops'                    → cnt_bus_stops\n"
+        "- 'subway / T stops'             → cnt_subway_entrances\n"
+        "- 'population'                   → population\n\n"
         "Return ONLY JSON, no explanation."
     )
 
