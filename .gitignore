@@ -1,8 +1,34 @@
 config.py
-config.py
-config.py
 __pycache__/
+**/__pycache__/
+*.pyc
 .env
 .env.example
+.DS_Store
 /test_results
 /data
+/cache
+/osm_cache.sqlite
+.gstack/
+
+# extracted RAR copies
+/auh_site_selection_agentic/
+/auh_site_selection_agentic-1/
+/auh_site_selection_agentic-2/
+/auh_site_selection_agentic.rar
+
+# large data files in demos
+auh_site_selection_agentic-3/abudhabi_osm_all_pois.csv
+auh_site_selection_agentic-3/output/*.parquet
+auh_site_selection_agentic-3/new-test/
+auh_site_selection_agentic-3/new-test-codegen/
+auh_site_selection_agentic-3/out/
+auh_site_selection_agentic-3/out_reports/
+auh_site_selection_agentic-3/o4-mini out_reports/
+auh_site_selection_agentic-3/web_demo/
+auh_site_selection_agentic-3/temp_med_queries/
+auh_site_selection_agentic-3/**/*.pyc
+
+# Boston demo data outputs (rebuilt by scripts)
+us_demo/output/
+
