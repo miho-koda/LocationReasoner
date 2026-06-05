@@ -8,26 +8,41 @@ The feature builder uses CATEGORY_MAP to aggregate SafeGraph POI rows.
 
 # Clean alias → SafeGraph TOP_CATEGORY (verified against Boston dataset)
 CATEGORY_MAP = {
+    # Food & drink
     "restaurants":    "Restaurants and Other Eating Places",
-    "physicians":     "Offices of Physicians",
-    "hospitals":      "General Medical and Surgical Hospitals",
+    "bars":           "Drinking Places (Alcoholic Beverages)",
+    "specialty_food": "Specialty Food Stores",
+    "beer_wine":      "Beer, Wine, and Liquor Stores",
+    # Retail
     "grocery":        "Grocery Stores",
     "clothing":       "Clothing Stores",
     "electronics":    "Electronics and Appliance Stores",
-    "banks":          "Depository Credit Intermediation",
-    "museums":        "Museums, Historical Sites, and Similar Institutions",
-    "recreation":     "Other Amusement and Recreation Industries",
-    "hotels":         "Traveler Accommodation",
-    "dentists":       "Offices of Dentists",
-    "universities":   "Colleges, Universities, and Professional Schools",
-    "specialty_food": "Specialty Food Stores",
-    "bars":           "Drinking Places (Alcoholic Beverages)",
-    "gas_stations":   "Gasoline Stations",
+    "department_stores": "Department Stores",
+    "furniture":      "Home Furnishings Stores",
     "health_stores":  "Health and Personal Care Stores",
-    "real_estate":    "Offices of Real Estate Agents and Brokers",
+    "gas_stations":   "Gasoline Stations",
+    "automotive":     "Automotive Parts, Accessories, and Tire Stores",
+    # Healthcare
+    "physicians":     "Offices of Physicians",
+    "hospitals":      "General Medical and Surgical Hospitals",
+    "dentists":       "Offices of Dentists",
+    "outpatient":     "Outpatient Care Centers",
+    # Education & culture
+    "universities":   "Colleges, Universities, and Professional Schools",
+    "schools":        "Elementary and Secondary Schools",
+    "museums":        "Museums, Historical Sites, and Similar Institutions",
+    "daycare":        "Child Day Care Services",
+    # Services
+    "banks":          "Depository Credit Intermediation",
     "legal":          "Legal Services",
+    "real_estate":    "Offices of Real Estate Agents and Brokers",
     "personal_care":  "Personal Care Services",
-    "transit":        "Urban Transit Systems",
+    "hotels":         "Traveler Accommodation",
+    "recreation":     "Other Amusement and Recreation Industries",
+    # Civic
+    "transit_systems": "Urban Transit Systems",
+    "religious":      "Religious Organizations",
+    "civic":          "Civic and Social Organizations",
 }
 
 # Aliases for which we compute distance-to-nearest columns
@@ -38,6 +53,28 @@ DISTANCE_CATEGORIES = [
     "grocery",
     "museums",
 ]
+
+# Spending columns aggregated per zone (most recent reliable year = 2023)
+SPEND_YEAR = 2023
+
+# Column name helpers for spending
+def spend_total_col(): return "spend_total"
+def spend_transactions_col(): return "spend_num_transactions"
+def spend_customers_col(): return "spend_num_customers"
+def spend_median_txn_col(): return "spend_median_per_txn"
+def spend_median_customer_col(): return "spend_median_per_customer"
+def spend_pct_change_col(): return "spend_pct_change"
+
+# Transport count columns
+def cnt_bus_stops_col(): return "cnt_bus_stops"
+def cnt_subway_col(): return "cnt_subway_entrances"
+
+# Parking columns
+def cnt_parking_col(): return "cnt_parking"
+def parking_capacity_col(): return "parking_capacity"
+
+# Population column
+def population_col(): return "population"
 
 
 def cnt_col(alias: str) -> str:
