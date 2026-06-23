@@ -1,34 +1,40 @@
-config.py
+# Python
 __pycache__/
 **/__pycache__/
 *.pyc
+*.pyo
+.python-version
+
+# Environment
 .env
 .env.example
+config.py
+
+# OS
 .DS_Store
-/test_results
+**/.DS_Store
+
+# Excel temp lock files
+~$*.xlsx
+~$*.xls
+
+# Local data and cache
 /data
 /cache
 /osm_cache.sqlite
-.gstack/
+/results
+/submissions
+/test_results
 
-# extracted RAR copies
+# Research iteration folders (local only)
 /auh_site_selection_agentic/
 /auh_site_selection_agentic-1/
 /auh_site_selection_agentic-2/
+/auh_site_selection_agentic-3/
 /auh_site_selection_agentic.rar
+/us_demo/
+/locationreasoner_demo/
 
-# large data files in demos
-auh_site_selection_agentic-3/abudhabi_osm_all_pois.csv
-auh_site_selection_agentic-3/output/*.parquet
-auh_site_selection_agentic-3/new-test/
-auh_site_selection_agentic-3/new-test-codegen/
-auh_site_selection_agentic-3/out/
-auh_site_selection_agentic-3/out_reports/
-auh_site_selection_agentic-3/o4-mini out_reports/
-auh_site_selection_agentic-3/web_demo/
-auh_site_selection_agentic-3/temp_med_queries/
-auh_site_selection_agentic-3/**/*.pyc
-
-# Boston demo data outputs (rebuilt by scripts)
-us_demo/output/
-
+# IDE
+.gstack/
+.claude/
