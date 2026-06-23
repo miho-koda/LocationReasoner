@@ -1,0 +1,6 @@
+{
+  "all_of": [
+    { "metric": "cnt_malls", "op": ">=", "value": 2 },
+    { "metric": "cnt_furniture", "op": ">=", "value": 1 }
+  ]
+}

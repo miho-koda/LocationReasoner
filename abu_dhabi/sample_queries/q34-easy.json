@@ -1,0 +1,1 @@
+{ "all_of": [ { "metric": "cnt_electronics", "op": ">=", "value": 3 } ] }

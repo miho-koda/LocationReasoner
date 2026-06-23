@@ -1,0 +1,1 @@
+{ "all_of": [ { "metric": "cnt_fast_food", "op": ">=", "value": 3 } ] }

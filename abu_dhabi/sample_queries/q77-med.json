@@ -1,0 +1,6 @@
+{
+  "all_of": [
+    { "metric": "cnt_restaurants", "op": ">=", "value": 2 },
+    { "metric": "cnt_supermarkets", "op": ">=", "value": 2 }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+"all_of": [
+{ "metric": "cnt_mosques", "op": ">=", "value": 1 },
+{ "metric": "cnt_parks", "op": ">=", "value": 1 },
+{ "metric": "dist_to_tourist_landmarks_m", "op": "<=", "value": 1200 },
+{ "metric": "cnt_fast_food", "op": "<=", "value": 2 }
+]
+}

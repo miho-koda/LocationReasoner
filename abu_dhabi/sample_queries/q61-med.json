@@ -1,0 +1,6 @@
+{
+  "all_of": [
+    { "metric": "cnt_malls", "op": ">=", "value": 1 },
+    { "metric": "cnt_tourist_landmarks", "op": ">=", "value": 1 }
+  ]
+}

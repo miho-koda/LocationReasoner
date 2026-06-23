@@ -1,0 +1,6 @@
+{
+  "all_of": [
+    { "metric": "cnt_parks", "op": ">=", "value": 1 },
+    { "metric": "cnt_mosques", "op": ">=", "value": 1 }
+  ]
+}

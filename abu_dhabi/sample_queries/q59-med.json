@@ -1,0 +1,6 @@
+{
+  "any_of": [
+    { "metric": "cnt_fast_food", "op": ">=", "value": 3 },
+    { "metric": "cnt_restaurants", "op": ">=", "value": 5 }
+  ]
+}

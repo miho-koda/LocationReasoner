@@ -1,0 +1,1 @@
+{ "all_of": [ { "metric": "cnt_sports", "op": ">=", "value": 2 } ] }

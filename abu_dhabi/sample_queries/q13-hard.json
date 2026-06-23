@@ -1,0 +1,8 @@
+{
+  "all_of": [
+    { "metric": "cnt_mosques", "op": ">=", "value": 1 },
+    { "metric": "cnt_supermarkets", "op": ">=", "value": 2 },
+    { "metric": "dist_to_tourist_landmarks_m", "op": "<=", "value": 1000 },
+    { "metric": "cnt_coffee_shops", "op": "<=", "value": 2 }
+  ]
+}

@@ -1,0 +1,1 @@
+{ "all_of": [ { "metric": "cnt_clothes", "op": ">=", "value": 4 } ] }

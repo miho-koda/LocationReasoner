@@ -1,0 +1,6 @@
+{
+  "any_of": [
+    { "metric": "cnt_department_stores", "op": ">=", "value": 2 },
+    { "metric": "cnt_clothes", "op": ">=", "value": 3 }
+  ]
+}

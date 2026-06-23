@@ -1,0 +1,1 @@
+{ "all_of": [ { "metric": "cnt_convenience", "op": ">=", "value": 2 } ] }

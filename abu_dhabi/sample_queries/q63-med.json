@@ -1,0 +1,6 @@
+{
+  "all_of": [
+    { "metric": "cnt_convenience", "op": ">=", "value": 3 },
+    { "metric": "cnt_electronics", "op": ">=", "value": 2 }
+  ]
+}

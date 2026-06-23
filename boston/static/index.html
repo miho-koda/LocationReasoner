@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Query Console - Boston Site Selection</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Work+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body data-theme="dark">
+
+<div id="app">
+  <aside id="side-panels">
+    <header class="side-header">
+      <div class="brand">
+        <div class="brand-title">LLM Query Console</div>
+        <div class="brand-subtitle">Boston Site Selection</div>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-ghost" id="theme-toggle" type="button">Toggle theme</button>
+      </div>
+    </header>
+
+    <div class="panel-grid">
+      <section class="panel llm-card">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Prompt</div>
+            <div class="panel-subtitle">Type a natural language request. The system will check data, verify the JSON spec, then run evaluation.</div>
+          </div>
+          <div class="panel-controls">
+            <select id="model-select" class="select">
+              <option value="deepseek-chat" selected>deepseek-chat</option>
+              <option value="deepseek-reasoner">deepseek-reasoner</option>
+            </select>
+            <select id="strategy-select" class="select">
+              <option value="direct" selected>direct</option>
+              <option value="react">react</option>
+              <option value="reflexion">reflexion</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="stepper">
+          <div class="step pending" data-step="data">
+            <div class="step-title">1. Data check</div>
+            <div class="step-meta" id="step-data-meta">Pending</div>
+          </div>
+          <div class="step pending" data-step="spec">
+            <div class="step-title">2. Spec verification</div>
+            <div class="step-meta" id="step-spec-meta">Pending</div>
+          </div>
+          <div class="step pending" data-step="run">
+            <div class="step-title">3. Evaluation</div>
+            <div class="step-meta" id="step-run-meta">Pending</div>
+          </div>
+        </div>
+
+        <div class="chat-log" id="chat-log"></div>
+
+        <div class="spec-panel" id="spec-panel">
+          <div class="spec-header">
+            <div class="spec-title">Spec preview</div>
+            <div class="pill" id="spec-status">Awaiting</div>
+          </div>
+          <pre class="spec-json" id="spec-json">No spec generated yet.</pre>
+          <div class="spec-issues" id="spec-issues"></div>
+        </div>
+
+        <div class="prompt-box">
+          <textarea id="prompt-input" class="prompt-input" placeholder="Example: Find zones within 500 meters of a hospital and at least 3 restaurants, with at least 1 pharmacy."></textarea>
+          <div class="prompt-actions">
+            <button class="btn btn-primary" id="btn-run" type="button">Run pipeline</button>
+            <button class="btn btn-ghost" id="btn-clear" type="button">Clear</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel results-card">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Results</div>
+            <div class="panel-subtitle">GT, LLM output, and comparison metrics.</div>
+          </div>
+        </div>
+
+        <div class="result-block">
+          <div class="block-title">Ground truth</div>
+          <div class="steps" id="gt-steps"></div>
+        </div>
+
+        <div class="result-block">
+          <div class="block-title" id="llm-panel-title">LLM output</div>
+          <div class="steps" id="llm-steps"></div>
+        </div>
+
+        <div class="result-block">
+          <div class="block-title">Comparison</div>
+          <div class="steps" id="compare-steps"></div>
+          <div class="metrics">
+            <div class="metric">
+              <div class="metric-label">Precision</div>
+              <div class="metric-value" id="m-precision">-</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">Recall</div>
+              <div class="metric-value" id="m-recall">-</div>
+            </div>
+            <div class="metric">
+              <div class="metric-label">F1</div>
+              <div class="metric-value" id="m-f1">-</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel zone-rank-card" id="zone-rank-section" style="display:none">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Zone Rankings</div>
+            <div class="panel-subtitle" id="zr-subtitle">Closest matches to your query</div>
+          </div>
+          <div class="panel-controls">
+            <div class="rank-mode-toggle">
+              <button class="rmt-btn active" id="btn-mode-formula" onclick="setRankMode('formula')">Rank by Formula</button>
+              <button class="rmt-btn" id="btn-mode-llm" onclick="setRankMode('llm')">Rank by LLM</button>
+            </div>
+<span class="pill pill-muted" id="spearman-badge" style="display:none">&#961; = &#8211;</span>
+          </div>
+        </div>
+        <div id="no-gt-banner" class="no-gt-banner" style="display:none">
+          <span class="no-gt-icon">⚠</span>
+          <div>
+            <div class="no-gt-title">No zones satisfy all constraints</div>
+            <div class="no-gt-msg" id="no-gt-msg">Showing closest partial matches below.</div>
+          </div>
+        </div>
+        <div id="zone-rank-list"></div>
+      </section>
+
+      <section class="panel code-card" id="code-section">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Generated code</div>
+            <div class="panel-subtitle">Direct mode only.</div>
+          </div>
+        </div>
+        <pre class="code-block" id="generated-code"></pre>
+      </section>
+
+      <section class="panel agent-card" id="agent-section">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Agent trace</div>
+            <div class="panel-subtitle">ReAct and Reflexion traces.</div>
+          </div>
+        </div>
+        <div class="agent-meta">
+          <span id="agent-meta">No trace available.</span>
+          <span id="agent-status" class="pill pill-muted">Not run</span>
+        </div>
+        <div id="reflections-wrap" class="reflections" style="display:none">
+          <div class="reflections-title">Reflections</div>
+          <div id="reflections-list"></div>
+        </div>
+        <div class="trace-steps" id="agent-trace-steps"></div>
+      </section>
+    </div>
+  </aside>
+
+  <div id="map-wrap">
+    <div id="map"></div>
+    <div class="legend" id="map-legend">
+      <div class="legend-title">Map legend</div>
+      <div id="legend-standard">
+        <div class="legend-item"><span class="legend-color" style="background: rgba(200,200,200,0.25)"></span><span>All zones</span></div>
+        <div class="legend-item"><span class="legend-color" style="background: rgba(34,122,246,0.65)"></span><span>GT filter</span></div>
+        <div class="legend-item"><span class="legend-color" style="background: rgba(133,86,255,0.6)"></span><span>LLM filter</span></div>
+        <div class="legend-item"><span class="legend-color" style="background: rgba(29,154,108,0.7)"></span><span>True positive</span></div>
+        <div class="legend-item"><span class="legend-color" style="background: rgba(224,82,82,0.7)"></span><span>False positive</span></div>
+        <div class="legend-item"><span class="legend-color" style="background: rgba(38,70,83,0.7)"></span><span>False negative</span></div>
+      </div>
+      <div id="legend-ranked" style="display:none">
+        <div class="legend-item"><span class="legend-color" style="background: #1d9a6c"></span><span>100% satisfied</span></div>
+        <div class="legend-item"><span class="legend-color" style="background: #4ecb9e"></span><span>75–99%</span></div>
+        <div class="legend-item"><span class="legend-color" style="background: #f4b06b"></span><span>50–74%</span></div>
+        <div class="legend-item"><span class="legend-color" style="background: #f4a259"></span><span>25–49%</span></div>
+        <div class="legend-item"><span class="legend-color" style="background: #f0a3a3"></span><span>1–24%</span></div>
+        <div class="legend-item"><span class="legend-color" style="background: #e05252"></span><span>0% satisfied</span></div>
+      </div>
+    </div>
+    <div class="status-toast" id="status-toast"></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

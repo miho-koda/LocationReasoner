@@ -1,0 +1,6 @@
+{
+  "any_of": [
+    { "metric": "cnt_pharmacies", "op": ">=", "value": 2 },
+    { "metric": "cnt_supermarkets", "op": ">=", "value": 2 }
+  ]
+}

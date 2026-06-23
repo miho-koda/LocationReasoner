@@ -1,0 +1,6 @@
+{
+  "any_of": [
+    { "metric": "cnt_bakeries", "op": ">=", "value": 2 },
+    { "metric": "cnt_convenience", "op": ">=", "value": 2 }
+  ]
+}

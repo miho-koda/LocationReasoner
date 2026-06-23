@@ -1,0 +1,1 @@
+{ "all_of": [ { "metric": "cnt_furniture", "op": ">=", "value": 2 } ] }

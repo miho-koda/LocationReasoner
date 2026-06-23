@@ -1,0 +1,8 @@
+{
+"all_of": [
+{ "metric": "cnt_electronics", "op": ">=", "value": 1 },
+{ "metric": "cnt_furniture", "op": ">=", "value": 1 },
+{ "metric": "dist_to_malls_m", "op": "<=", "value": 900 },
+{ "metric": "cnt_restaurants", "op": "<=", "value": 3 }
+]
+}

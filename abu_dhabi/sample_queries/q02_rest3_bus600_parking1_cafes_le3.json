@@ -1,0 +1,8 @@
+{
+"all_of": [
+{ "metric": "cnt_restaurants", "op": ">=", "value": 3 },
+{ "metric": "dist_to_bus_stations_m","op": "<=", "value": 600 },
+{ "metric": "cnt_parking", "op": ">=", "value": 1 },
+{ "metric": "cnt_coffee_shops", "op": "<=", "value": 3 }
+]
+}

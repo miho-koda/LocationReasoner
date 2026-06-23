@@ -1,0 +1,7 @@
+flask
+flask-cors
+openai
+pandas
+numpy
+pyarrow
+h3

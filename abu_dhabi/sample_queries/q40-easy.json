@@ -1,0 +1,1 @@
+{ "all_of": [ { "metric": "cnt_parks", "op": ">=", "value": 1 } ] }

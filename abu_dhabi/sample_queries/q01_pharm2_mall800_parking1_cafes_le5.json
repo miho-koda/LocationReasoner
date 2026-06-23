@@ -1,0 +1,8 @@
+{
+"all_of": [
+{ "metric": "cnt_pharmacies", "op": ">=", "value": 2 },
+{ "metric": "dist_to_malls_m", "op": "<=", "value": 800 },
+{ "metric": "cnt_parking", "op": ">=", "value": 1 },
+{ "metric": "cnt_coffee_shops", "op": "<=", "value": 5 }
+]
+}

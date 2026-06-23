@@ -1,0 +1,8 @@
+{
+  "all_of": [
+    { "metric": "cnt_parks", "op": ">=", "value": 2 },
+    { "metric": "dist_to_malls_m", "op": "<=", "value": 900 },
+    { "metric": "cnt_parking", "op": ">=", "value": 1 },
+    { "metric": "cnt_fast_food", "op": "<=", "value": 3 }
+  ]
+}

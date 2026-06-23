@@ -1,0 +1,12 @@
+{
+"all_of": [
+{
+"any_of": [
+{ "metric": "cnt_clothes", "op": ">=", "value": 2 },
+{ "metric": "cnt_department_stores","op": ">=", "value": 1 }
+]
+},
+{ "metric": "dist_to_malls_m", "op": "<=", "value": 800 },
+{ "metric": "cnt_fast_food", "op": "<=", "value": 3 }
+]
+}
