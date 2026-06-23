@@ -1,229 +1,25 @@
-import os
-import time
-import geopandas as gpd
-import pandas as pd
-import argparse
-from react_agent import ZoneAgent
+"""
+Query Bank — canonical list of all benchmark prompts.
+Union of all prompt lists from code_task_executor.py, react_task_executor.py, and limited_tools_executor.py.
+Where files differ, the version with MORE items is used.
 
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import os
-import time
-from react_agent import ZoneAgent
+Structure:
+    simple_1  ... simple_18  (simple query categories 1-18)
+    medium_1  ... medium_16  (medium query categories 1-16)
+    hard_1    ... hard_17    (hard query categories 1-17)
+"""
 
-from site_selection.analysis import get_spendparam_years, get_num_parking, get_largest_parking_lot_area, get_largest_parking_capacity, get_distance_km
-from site_selection.filter import filter_df_based_on_zone, filter_pois_by_top_category, filter_pois_by_sub_category, get_transport_pois_in_zone
-from site_selection.loader import get_parking_dataset, get_poi_spend_dataset
-from site_selection.zone import assign_poi_zones, create_zone, assign_parking_zones, get_neighbor_zones, get_zone_center
-
-from shapely.geometry import Point, Polygon, MultiPoint
-from scipy.spatial import ConvexHull
-from sklearn.cluster import MiniBatchKMeans
-from shapely.wkt import loads as load_wkt
-from shapely.geometry import Point
-
-import json
-
-from config_utils import load_config
-
-config = load_config()
-
-    
-
-
-
-def parse_arguments():
-    """Parse command line arguments"""
-    parser = argparse.ArgumentParser(description='Zone Analysis Framework')
-    parser.add_argument('--mode', type=str, default='reflexion',
-                      choices=['zero_shot', 'reflexion'],
-                      help='Mode of operation')
-    parser.add_argument('--model', type=str, default='gpt-4o',
-                      help='Language model to use')
-    parser.add_argument('--max_steps', type=int, default=15,
-                      help='Maximum number of steps')
-    parser.add_argument('--max_retries', type=int, default=3,
-                      help='Maximum number of retries per action')
-    parser.add_argument('--output_path', type=str, default='output',
-                      help='Path to save results')
-    return parser.parse_args()
-
-def run_single_prompt(prompt_text, llm_name, test_case_idx, args, test_case_folder):
-    """
-    Run a single prompt through the ZoneAgent, save zone ids inside specific test case folder,
-    compare with objective.csv inside the same folder, update a central logistics file.
-    """
-    print(f"\n=== Processing Test Case {test_case_idx} ===")
-    print(f"Prompt: {prompt_text}")
-
-    agent = ZoneAgent(
-        mode=args.mode,
-        model_name=args.model,
-        max_steps=args.max_steps,
-        max_retries=args.max_retries
-    )
-
-    test_case = f"test_case_{test_case_idx}"
-
-    print(f"\nAnalyzing {test_case}: {prompt_text}")
-    print("-" * 80)
-
-    start_time = time.time()
-    
-    answer, scratchpad = agent.run(prompt_text)
-    if answer: 
-        result_status = "success"
-        execution_successful = True
-    else:
-        result_status = "execution_error"
-        execution_successful = False
-    generation_time = time.time() - start_time
-
-    print("\nAnalysis Results:")
-    print(answer)
-    print("\nReasoning Process:")
-    print(scratchpad)
-    print("=" * 80)
-
-    # Save scratchpad to file - now this will run even if agent.run() fails
-    os.makedirs(test_case_folder, exist_ok=True)
-    scratchpad_path = os.path.join(test_case_folder, f"{test_case}_scratchpad_reflexion.txt")
-    with open(scratchpad_path, 'w', encoding='utf-8') as f:
-        f.write(scratchpad)
-    print(f"✅ Saved scratchpad to {scratchpad_path}")
-
-    import re
-
-    try:
-        # Only process and save zone IDs if execution was successful
-        if execution_successful:
-            # Check if answer is a string that looks like a list
-            if isinstance(answer, str):
-                answer_clean = answer.strip('[]{}')
-
-                # Try extracting numbers if any
-                numbers_found = re.findall(r'\d+', answer_clean)
-                
-                if numbers_found:
-                    zone_ids_list = [int(x) for x in numbers_found]
-                    zone_ids_result = pd.Series(zone_ids_list, name="zone_id")
-                else:
-                    # If no numbers found, just an empty list
-                    zone_ids_result = pd.Series([], name="zone_id")
-
-                # Save result zone ids
-                os.makedirs(test_case_folder, exist_ok=True)
-                save_path = os.path.join(test_case_folder, f"{test_case}_reflexion.csv")
-                zone_ids_result.to_csv(save_path, index=False)
-                print(f"✅ Saved survived zone ids to {save_path}")
-
-                # Load objective.csv
-                objective_path = os.path.join(test_case_folder, "objective.csv")
-                if not os.path.exists(objective_path):
-                    print(f"❌ Objective file {objective_path} does not exist. Skipping comparison.")
-                    result_status = "objective_missing"
-                else:
-                    objective_df = pd.read_csv(objective_path)
-                    zone_ids_objective = objective_df["zone_id"].dropna().astype(str).reset_index(drop=True)
-                    zone_ids_objective = zone_ids_objective.sort_values(ignore_index=True)
-
-                    zone_ids_result = zone_ids_result.dropna().astype(str).reset_index(drop=True)
-                    zone_ids_result = zone_ids_result.sort_values(ignore_index=True)
-
-                    if zone_ids_result.equals(zone_ids_objective):
-                        result_status = "same"
-                        print("✅ zone_id columns match exactly.")
-                    else:
-                        result_status = "different"
-                        print("❌ zone_id columns differ.")
-                        only_in_result = zone_ids_result[~zone_ids_result.isin(zone_ids_objective)]
-                        only_in_objective = zone_ids_objective[~zone_ids_objective.isin(zone_ids_result)]
-
-                        print("\n🔍 zone_ids only in result:")
-                        print(only_in_result.head(10))
-
-                        print("\n🔍 zone_ids only in objective:")
-                        print(only_in_objective.head(10))
-
-            else:
-                print(f"❌ Answer is not a string, it's a {type(answer)}")
-                result_status = "invalid_answer_type"
-
-    except Exception as e:
-        print(f"❌ Error during parsing/comparison: {e}")
-        result_status = "comparison_error"
-
-    # === Update central logistics file ===
-    logistics_path = config.get("logistics_path", "./test_results/logistics.csv")
-
-
-    new_entry = pd.DataFrame([{
-        "test_case": test_case,
-        "llm": llm_name,
-        "generation_time": round(generation_time, 2),
-        "execution_time": "-",
-        "comparison": result_status,
-        "prompt": prompt_text,
-        "test_case_folder": test_case_folder
-    }])
-
-    if os.path.exists(logistics_path):
-        logistics_df = pd.read_csv(logistics_path)
-        logistics_df = pd.concat([logistics_df, new_entry], ignore_index=True)
-    else:
-        logistics_df = new_entry
-
-    logistics_df.to_csv(logistics_path, index=False)
-    print(f"✅ Logged {test_case} | {llm_name}: {result_status} | Gen: {round(generation_time, 2)}s")
-
-def run_all_prompts(prompts, llm_name, args, test_case_folders):
-    """
-    Run multiple prompts sequentially, each directed to its own test case folder.
-    """
-    for idx, prompt_text in enumerate(prompts):
-       
-        run_single_prompt(
-            prompt_text,
-            llm_name,
-            idx,
-            args,
-            test_case_folders[idx]
-        )
-def prep(prompts, difficulty, i):
-    args = parse_arguments()
-    base_folder = config.get("result_root", "./test_results")
-
-
-    # Only run inside sim/1
-    difficulty_path = os.path.join(base_folder, difficulty, str(i))  # <--- only sim/1
-
-    if not os.path.isdir(difficulty_path):
-        print(f"❌ Folder does not exist: {difficulty_path}")
-        return
-
-    # Build the test case folders based on the index of simple_1
-    test_case_folders = []
-    for idx in range(len(prompts)):
-        folder_name = f"tc_{difficulty}_{i}_{idx}"
-        full_test_case_path = os.path.join(difficulty_path, folder_name)
-        if os.path.isdir(full_test_case_path):
-            test_case_folders.append(full_test_case_path)
-        else:
-            print(f"⚠️ Warning: Folder does not exist: {full_test_case_path}")
-
-    print(f"▶️ Running prompts for {difficulty_path}")
-    run_all_prompts(prompts, args.model, args, test_case_folders)
-
-# Example prompts
-
+# ==============================================================================
+# Simple queries (categories 1-18)
+# ==============================================================================
 
 simple_1 = [
     "I want to build a POI in a zone where there are at least 10 parking spaces.",
     "I want to open a new restaurant, but I need a location with at least 50 parking spots nearby.",
     "Looking for a spot to build a shopping mall—must have at least 200 parking spaces.",
-    "I’m planning to construct a medical clinic. Are there zones with at a parking lot with least 30 parking spots available?",
+    "I'm planning to construct a medical clinic. Are there zones with at a parking lot with least 30 parking spots available?",
     "Where could I put a new grocery store? It needs a parking lot with at least 80 parking spaces.",
     "I need to find a location for a movie theater, ideally a parking lot with 150+ parking spots.",
-     
 ]
 
 simple_2 = [
@@ -233,7 +29,6 @@ simple_2 = [
     "I want to build a transportation hub in with at least one parking lot spanning 12,000+ square meters.",
     "Where in  could I develop a business park that includes a parking lot over 9,000 square meters?",
     "Planning an industrial zone —need at least one parking lot bigger than 5,500 square meters.",
-
 ]
 
 simple_3 = [
@@ -243,37 +38,33 @@ simple_3 = [
     "Planning an urgent care clinic in where the zone includes at least 4 parking lots.",
     "Where in could I build a farmers market with at least 3 parking lots nearby?",
     "Want to create a coworking space in zone needs at least 2 parking lots.",
-
 ]
 
 simple_4 = [
-    "I want to open a clothing store, white plains with top category being {Other Schools and Instruction} and sub category being {Exam Preparation and Tutoring} , show me zones with less than 3 competitors in the same category", 
+    "I want to open a clothing store, white plains with top category being {Other Schools and Instruction} and sub category being {Exam Preparation and Tutoring} , show me zones with less than 3 competitors in the same category",
     "I want to open a clothing store in. Top category: {Other Amusement and Recreation Industries}, sub-category: {Fitness and Recreational Sports Centers}. Show me zones with fewer than 3 competitors in the same sub-category.",
     "Looking to launch a mental health practice. Top category: {Offices of Physicians}, sub-category: {Offices of Physicians, Mental Health Specialists}. Highlight areas with less than 2 competitors in this sub-category.",
     "Planning a residential remodeling business. Top category: {Residential Building Construction}, sub-category: {Residential Remodelers}. Identify zones where competitors in this sub-category is under 4.",
     "I want to open a medical practice (Top category: {Offices of Physicians}). Show me zones with less than 3 competing clinics in this category.",
     "Looking to start a real estate agency (Top category: {Offices of Real Estate Agents and Brokers}). Where are areas with fewer than 2 competitor agencies?",
-
 ]
 
 simple_5 = [
-    "I want to look at zones where the raw total spend at year 2022 is ≥ 40000", 
+    "I want to look at zones where the raw total spend at year 2022 is ≥ 40000",
     "I want to look at zones where the raw total spend at year 2019 is ≥ $45M.",
     "Analyze zones where raw total spend at year 2024 ≥ $6500000.",
     "Identify areas with raw total spend at year 2022 ≥ $850000.",
     "Filter zones where raw total spend at year 2023 ≥ $550000.",
     "Find areas with 500,000+ transactions in 2022.",
-        
 ]
 
 simple_6 = [
-    "I want to open a restaurant where the total population of my zone and my 2 closest neighboring zones is greater than or equal to 10,000", 
+    "I want to open a restaurant where the total population of my zone and my 2 closest neighboring zones is greater than or equal to 10,000",
     "I want to open an Italian restaurant where my zone plus 2 closest neighbors have at least 12,000 residents combined.",
     "Looking for a location to launch a food truck park - need my zone plus 3 adjacent zones to total atleast 15,000+ people.",
     "Show me areas where I can open a Cuban cafe with at least 8,000 people in my zone and 1 closest neighboring zone.",
     "Find me locations for a seafood restaurant where my zone plus 2 surrounding zones contain greater than or equal to 18,000+ residents.",
     "I need to build a steakhouse - require my zone plus 4 closest neighbors to have 25,000 people minimum.",
-    
 ]
 
 simple_7 = [
@@ -283,7 +74,6 @@ simple_7 = [
     "Planning a bistro. Identify areas with 4+ poi with top category {Restaurants and Other Eating Places} within the zone.",
     "I want to open a neighborhood pub. Show me locations with 3+ {Drinking Places (Alcoholic Beverages)} as top category already operating.",
     "I want to open a home decor boutique. Show me zones with at least 3 existing {Home Furnishings Stores} as top category nearby.",
-
 ]
 
 simple_8 = [
@@ -292,8 +82,7 @@ simple_8 = [
     "Highlight zones with 6+ POIs in the sub-categories {Lessors of Residential Buildings and Dwellings} or {Elementary and Secondary Schools} for student housing.",
     "Identify locations with 15+ POIs in the sub-categories {Supermarkets and Other Grocery (except Convenience) Stores} or {Snack and Nonalcoholic Beverage Bars} for a grocery-cafe concept.",
     "Find zones with 10+ POIs in the sub-categories {Barber Shops}, {Jewelry Stores}, {Other Personal Care Services} for a barbershop chain.",
-    "Highlight locations with 7+ POIs in the sub-categories {Women's Clothing Stores} or {Jewelry Stores} for boutique retail.", 
-        
+    "Highlight locations with 7+ POIs in the sub-categories {Women's Clothing Stores} or {Jewelry Stores} for boutique retail.",
 ]
 
 simple_9 = [
@@ -303,7 +92,6 @@ simple_9 = [
     "Is there a zone with at least 7 taxi spots? I'd like to set up a hotel there.",
     "Thinking about opening a bakery, but only if the area has 2 or more subway entrances.",
     "Looking for a location that has a minimum of 4 taxi services around the zone — planning to open a community center.",
-            
 ]
 
 simple_10 = [
@@ -312,13 +100,12 @@ simple_10 = [
     "Show me zones where the distance to the nearest taxi stop is below 250 meters from the zone centroid.",
     "Can you find zones where the nearest subway entrance within the zone is within 100 meters of the zone centroid? I want something super walkable.",
     "Looking for zones where the distance from the zone centroid to the closest station within the zone is under 300 meters — trying to minimize commute time.",
-    "I’m searching for a place where the nearest bus stop within the zone is no more than 250 meters from the zone centroid. Accessibility is key.",
-    
+    "I'm searching for a place where the nearest bus stop within the zone is no more than 250 meters from the zone centroid. Accessibility is key.",
 ]
 
 simple_11 = [
     "Filter zones where at least 70% of POIs are within 500 meters of a subway entrance.",
-    "I’m looking for zones where 60% or more of the POIs fall within 300 meters of a station.",
+    "I'm looking for zones where 60% or more of the POIs fall within 300 meters of a station.",
     "Show me zones where at least 80% of POIs are within 400 meters of a bus stop.",
     "Can you find zones where 65% of POIs are within 350 meters of a taxi stop?",
     "Looking for zones where at least 75% of POIs are located within 400 meters of a bus stop.",
@@ -331,8 +118,7 @@ simple_12 = [
     "Find zones where at least 5 subway entrances are within 300 meters of the centroid.",
     "Show me zones that have at least 4 taxi stands located within 250 meters of the zone centroid.",
     "Highlight zones with at least 6 stations within 400 meters from the zone centroid.",
-    "I’m looking for zones where at least 3 aerodromes are located within 500 meters from the centroid.",
-        
+    "I'm looking for zones where at least 3 aerodromes are located within 500 meters from the centroid.",
 ]
 
 simple_13 = [
@@ -342,7 +128,6 @@ simple_13 = [
     "Filter for zones with access to at least 2 types of transportation options like subway, taxi, and bus.",
     "Identify zones where at least 3 transportation types are available for easy commuter access.",
     "Find me locations where the zone supports 4 or more different types of transportation.",
-            
 ]
 
 simple_14 = [
@@ -352,8 +137,6 @@ simple_14 = [
     "Can you locate zones where at least 60%+ of POIs belong to top category {Offices of Physicians}?",
     "Looking for zones where at least 45% of POIs are in sub category {Educational Support Services}.",
     "I need zones where 30% or more of POIs are under top category {Personal Care Services}.",
-        
-
 ]
 
 simple_15 = [
@@ -363,17 +146,15 @@ simple_15 = [
     "Can you highlight areas where sub category {Offices of Dentists} outnumber all other sub categories?",
     "I'm trying to find zones where the leading POI sub category is {Gasoline Stations with Convenience Stores}.",
     "Identify zones where sub category {Art Dealers} appears more than any other.",
-        
 ]
 
 simple_16 = [
     "I want to open a medical clinic where over 50% of the total spending in 2023 comes from top category {Offices of Physicians}.",
     "Find zones where at least 40% of the transaction volume in 2022 is from sub category {Couriers and Express Delivery Services}.",
     "Show me areas where 60% of the total dollars spent in 2023 went to top category {Legal Services}.",
-    "I’m targeting zones where over 35% of the total sales in 2022 come from sub category {Used Car Dealers}.",
+    "I'm targeting zones where over 35% of the total sales in 2022 come from sub category {Used Car Dealers}.",
     "Looking for regions where 45% of all customers in 2023 interacted with sub category {Offices of Lawyers}.",
     "Where in the city does top category {Other Amusement and Recreation Industries} contribute over 55% of the spending in 2022?",
-
 ]
 
 simple_17 = [
@@ -383,20 +164,23 @@ simple_17 = [
     "I want to find areas where there are at least 60 POIs — good for foot traffic and visibility.",
     "I'm launching a pet grooming service and need a zone with 20 or more active businesses.",
     "Highlight zones that have 5+ POIs total — I want a lively place for a music lounge.",
-            
 ]
 
 simple_18 = [
-    "I want areas where top category {Offices of Physicians} doesn’t dominate more than 15% of POIs.",
+    "I want areas where top category {Offices of Physicians} doesn't dominate more than 15% of POIs.",
     "Show me zones where the sub category {Offices of Lawyers} is no more than 20%.",
     "Avoid zones where top category {Offices of Physicians} takes up more than 9% of businesses.",
     "Give me zones where no sub category like {Fitness and Recreational Sports Centers} accounts for more than 25%.",
     "Looking for diverse areas—no single top category such as {Offices of Other Health Practitioners} should go above 20%.",
     "I want to skip zones where the sub category {Investment Advice} represents more than 60% of POIs.",
-            
 ]
+
+# ==============================================================================
+# Medium queries (categories 1-16)
+# ==============================================================================
+
 medium_1 = [
-    "I’m looking for zones where raw total spend from 2019 to 2021 was more than $22 million.",
+    "I'm looking for zones where raw total spend from 2019 to 2021 was more than $22 million.",
     "Identify areas where over 400,000 transactions took place between 2020 and 2022.",
     "Show me zones with at least 150,000 unique customers across the years 2021 to 2023.",
     "Analyze zones where raw total spend from 2020 to 2022 exceeded $18 million.",
@@ -411,7 +195,6 @@ medium_2 = [
     "I want to analyze parts where the average year-over-year spend change from 2020 to 2022 stayed consistently over 20%.",
     "Identify areas where the average median spend per transaction from 2019 to 2021 was more than $70 — targeting upscale shoppers.",
     "Looking at rural zones where the average spend per customer from 2020 to 2023 was at least $225.",
-            
 ]
 
 medium_3 = [
@@ -421,17 +204,15 @@ medium_3 = [
     "Need to open a convenience store where total transactions ≥ 300,000 and customer spend grew ≥ 7% year-over-year in 2023.",
     "Looking for a location for a food truck park - show me areas with ≥ 15,000 monthly customers and ≤ $9 median spend in 2022.",
     "Planning a bakery - find areas with 10%+ year-over-year spending growth and ≥ 20,000 transactions in 2021.",
-            
 ]
 
 medium_4 = [
-    "I’m looking to develop a business plaza—need a zone with at least 5 parking lots and one lot over 9,000 square meters.",
+    "I'm looking to develop a business plaza—need a zone with at least 5 parking lots and one lot over 9,000 square meters.",
     "Planning to open a medical center, and I want an area that either has at least 6 parking lots or one lot bigger than 12,000 square meters.",
     "I want to build a sports training facility where the zone includes at least 4 parking lots and one of them must exceed 10,000 square meters.",
     "Looking to set up a distribution center—open to zones that either have 3 or more parking lots or one very large lot of at least 15,000 square meters.",
     "Thinking about launching a garden center, but I need at least 2 parking lots and one of them must be larger than 5,000 square meters.",
-    "Considering a big-box retail location—must have at least 7 parking lots or one that’s bigger than 13,000 square meters.",
-            
+    "Considering a big-box retail location—must have at least 7 parking lots or one that's bigger than 13,000 square meters.",
 ]
 
 medium_5 = [
@@ -440,28 +221,25 @@ medium_5 = [
     "I want to develop a new sports complex, but only if the site has a parking lot with at least 250 parking spots and a single parking lot bigger than 10,000 square meters.",
     "I'm planning to open a convention center, and I need a parking lot with at least 400 parking spaces that is also larger than 12,000 square meters.",
     "Looking for a site to build a new hospital—must have a parking lot with more than 200 spaces and an area greater than 8,000 square meters.",
-    "I want to develop a luxury outlet mall, but only in zones where there’s a parking lot with at least 500 parking spots and over 15,000 square meters in size.",
-            
+    "I want to develop a luxury outlet mall, but only in zones where there's a parking lot with at least 500 parking spots and over 15,000 square meters in size.",
 ]
 
 medium_6 = [
-    "I’m looking to build a lifestyle center, and I need a zone with at least 4 parking lots, one of which has at least 300 parking spaces.",
+    "I'm looking to build a lifestyle center, and I need a zone with at least 4 parking lots, one of which has at least 300 parking spaces.",
     "Planning a sports arena—only considering zones with at least 6 parking lots and one with over 500 parking spaces.",
     "Thinking of opening a regional conference center—must have at least 5 parking lots, with one offering no fewer than 400 spaces.",
     "I want to open a premium outlet village, and I need a zone that includes at least 7 parking lots, with at least one lot providing 600 parking spots.",
-    "Looking to develop a modern civic center—I’m targeting areas with a minimum of 3 parking lots and at least one that holds 250 cars.",
+    "Looking to develop a modern civic center—I'm targeting areas with a minimum of 3 parking lots and at least one that holds 250 cars.",
     "Scouting locations for a university extension campus—must include 4 or more parking lots, and one must have at least 350 parking spaces.",
-            
 ]
 
 medium_7 = [
     "I want to open a clothing store with top category {Other Miscellaneous Store Retailers} and sub category {Art Dealers}. Show me zones with fewer than 4 competitors in the same sub-category and a combined population of at least 15,000 across the zone and its 3 closest neighbors.",
     "Thinking about launching a boutique. Top category: {Personal Care Services}, sub-category: {Beauty Salons}. I'm looking for zones with less than 5 competitors in the same category or where the zone plus 2 nearest neighbors have over 20,000 people.",
-    "I want to open a Korean BBQ restaurant where the total population of my zone and 2 closest zones is at least 18,000, and the number of existing competitors in the same category is fewer than 3.",
+    "I want to open a Korean BBQ restaurant with top category {Restaurants and Other Eating Places}, where the total population of my zone and 2 closest zones is at least 18,000, and the number of existing competitors in the same category is fewer than 3.",
     "I want to open a clothing store with top category {Offices of Real Estate Agents and Brokers} and sub category {Offices of Real Estate Agents and Brokers}. Show me zones with fewer than 3 competitors in the same sub-category and no fewer than 12,000 people across the zone and its 2 closest neighbors.",
     "I'm planning to launch a Mediterranean restaurant. I need a zone where there are fewer than 5 similar restaurants in the same category or where the combined population of the zone and 3 nearby zones is at least 25,000.",
     "Looking to open a clothing store with top category {Advertising, Public Relations, and Related Services} and sub category {Advertising Agencies}. Show me zones that either have fewer than 2 competitors in the same category or a combined population at least 8,000 with 2 adjacent zones.",
-            
 ]
 
 medium_8 = [
@@ -471,7 +249,6 @@ medium_8 = [
     "Looking to launch a wine bar. Find me zones that include at least 4 POIs in the top category {Beer, Wine, and Liquor Stores} and also have 4 or more taxi stands nearby.",
     "I'm interested in opening a coffee shop. Show me zones with at least 6 POIs in the top category {Snack and Nonalcoholic Beverage Bars} or a minimum of 5 bus stops in the area.",
     "I want to open a sushi restaurant. Show me zones with at least 5 POIs in the top category {Full-Service Restaurants} and a minimum of 4 subway entrances nearby.",
-    
 ]
 
 medium_9 = [
@@ -481,7 +258,6 @@ medium_9 = [
     "I'm looking to open a food truck hub where there are at least 6 bus stops nearby and the nearest one is within 200 meters of the zone centroid.",
     "Planning to launch a small hotel—I'm targeting zones that either have at least 3 subway entrances or one located within 120 meters of the zone centroid.",
     "I want to open a coworking space where the area includes at least 4 taxi stands and the closest one is no more than 250 meters from the zone centroid.",
-            
 ]
 
 medium_10 = [
@@ -491,17 +267,15 @@ medium_10 = [
     "I'm scouting locations for a craft brewery—interested in zones with 75% of are POIs within 350 meters of a bus stop or zones that include at least 6 bus stops.",
     "I want to set up a vegan restaurant in a zone where 80% of POIs are within 400 meters of a subway entrance and the area includes no fewer than 4 subway entrances.",
     "I'm looking to open a community theater where at least 70% of POIs are within 400 meters of a subway entrance and there are at least 3 subway entrances nearby.",
-    
 ]
 
 medium_11 = [
     "I want to open a clothing store with top category {Personal Care Services} and sub category {Beauty Salons}. Show me zones with fewer than 3 competitors in the same category and at least 2 parking lots.",
     "Thinking about launching a boutique. Top category: {Other Amusement and Recreation Industries}, sub-category: {Fitness and Recreational Sports Centers}. I need a zone with fewer than 4 competitors or at least 3 parking lots in the area.",
-    "Looking to open a clothing store with top category {Offices of Other Health Practitioners} and sub category {Offices of All Other Miscellaneous Health Practitioners}. Find me a zone with fewer than 2 competitors and at least 2 parking lots.", 
+    "Looking to open a clothing store with top category {Offices of Other Health Practitioners} and sub category {Offices of All Other Miscellaneous Health Practitioners}. Find me a zone with fewer than 2 competitors and at least 2 parking lots.",
     "I want to launch a fashion outlet. Top category: {Other Miscellaneous Store Retailers}, sub-category: {Art Dealers}. Show me zones with fewer than 5 competitors or zones with 4 or more parking lots.",
     "Planning to set up a sustainable clothing store. I want zones with fewer than 3 competitors in the same sub-category and a minimum of 3 parking lots nearby.",
     "I'm interested in opening a thrift store with top category {Educational Support Services} and sub category {Educational Support Services}. Show me zones with fewer than 4 competitors or areas that offer at least 2 parking lots.",
-                
 ]
 
 medium_12 = [
@@ -511,7 +285,6 @@ medium_12 = [
     "I'm planning to open a vegan café—targeting zones that have 4 or more POIs in the sub category {Snack and Nonalcoholic Beverage Bars} or where the total population across the zone and 2 nearby ones is at least 10,000.",
     "I want to start a sushi restaurant where my zone plus 3 closest neighbors have a combined population of 18,000 and at least 5 POIs in the sub category {Full-Service Restaurants}.",
     "Thinking of opening a dessert bar—I'm looking for zones with at least 3 sub category {Snack and Nonalcoholic Beverage Bars} or 2 nearest neighbors plus my zone having at least 9,000 residents total.",
-            
 ]
 
 medium_13 = [
@@ -521,17 +294,15 @@ medium_13 = [
     "Thinking of launching a wellness and café combo—show me zones with 10+ POIs in the sub-categories {Beauty Salons} or {Snack and Nonalcoholic Beverage Bars}, and where the closest bus stop is less than 200 meters away.",
     "I want to start a nightlife venue—looking for areas with at least 14 POIs in the sub-categories {Drinking Places (Alcoholic Beverages)} and {Snack and Nonalcoholic Beverage Bars}, and the nearest station under 250 meters from the centroid.",
     "Opening a boutique gym and smoothie shop—show me zones with 9 or more POIs in the sub-categories {Fitness and Recreational Sports Centers} and {Snack and Nonalcoholic Beverage Bars}, and the closest subway entrance within 200 meters of the centroid.",
-            
 ]
 
 medium_14 = [
     "Find zones where at least 35% of total raw total spend in 2020 comes from top category {Restaurants and Other Eating Places}.",
     "Show me zones where 40% or more of raw num transactions in 2021 come from top category {Gasoline Stations}.",
-    "I’m looking for areas where at least 30% of total raw num customers in 2022 are from top category {Personal Care Services}.",
+    "I'm looking for areas where at least 30% of total raw num customers in 2022 are from top category {Personal Care Services}.",
     "Identify zones where 50% or more of the total raw total spend in 2023 is attributed to top category {Offices of Physicians}.",
     "Filter zones where at least 45% of total raw num transactions in 2024 come from top category {Beer, Wine, and Liquor Stores}.",
     "Find me zones where at least 60% of the raw num customers in 2022 are tied to top category {Offices of Other Health Practitioners}.",
-            
 ]
 
 medium_15 = [
@@ -541,37 +312,37 @@ medium_15 = [
     "Find zones with at least 8 POIs and no more than 20% from top category {Management of Companies and Enterprises}.",
     "I'm targeting zones where at least 24 POIs exist and fewer than 35% are from {Scheduled Passenger Air Transportation}.",
     "Help me locate zones with over 30 POIs, but top category {Medical and Diagnostic Laboratories} should be below 40%.",
-            
 ]
 
 medium_16 = [
     "Looking to build a spa — find me areas where sub category {Advertising Agencies} dominates at least 40% of 2024 spend or has 2+ parking spots.",
     "Want to open a coffee lounge in a spot where sub category {Full-Service Restaurants} is strong — 50%+ of spend in 2022 — or somewhere with 4 parking spaces.",
     "I'm opening a family clinic and want zones where at least 60% of 2022 spending comes from sub category {Offices of Dentists} AND there's space for at least 2 parking lots.",
-    'Looking to build a spa — find me areas where sub category {Advertising Agencies} dominates at least 60% of 2024 spend or has 3+ parking spots.',
+    "Looking to build a spa — find me areas where sub category {Advertising Agencies} dominates at least 60% of 2024 spend or has 3+ parking spots.",
     "I'm exploring locations for a tutoring center — it should either have 30%+ of 2019's spend from top category {Legal Services} or decent parking: at least 2 lots.",
     "I'm opening a family clinic and want zones where at least 30% of 2020 spending comes from sub category {Offices of Dentists} AND there's space for at least 2 parking lots.",
-    
 ]
+
+# ==============================================================================
+# Hard queries (categories 1-17)
+# ==============================================================================
 
 hard_1 = [
     "I want to open a breakfast cafe — looking for zones where median spend per transaction was under $18, total spend was over $30 million, and there were at least 90,000 customers in 2022.",
     "Where should I open a boutique gym? I need areas with median spend per customer above $250, over 100,000 transactions, and a year-over-year spend growth rate of at least 6% in 2023.",
-    "Thinking about launching a taco truck — I’m targeting zones with under $20 median spend per transaction, 50,000+ customers, a 10%+ year-over-year spending increase, and total spend above $15M in 2021.",
+    "Thinking about launching a taco truck — I'm targeting zones with under $20 median spend per transaction, 50,000+ customers, a 10%+ year-over-year spending increase, and total spend above $15M in 2021.",
     "Looking to place a vintage bookstore. Ideal zones would have median spend per customer ≤ $35, total spend ≥ $40 million, transactions over 120,000, and year-over-year spend growth > 5% in 2024.",
-    "Opening a food hall — I’m looking for zones with $70M+ in total spend, 200,000+ yearly transactions, median spend per transaction under $25, and at least 150,000 customers in 2022.", 
-    "Thinking of opening a jazz bar — I’m looking for zones with at least $25 million in total spend, median spend per customer below $40, more than 80,000 customers, and year-over-year spend growth over 4% in 2023.",
-    
+    "Opening a food hall — I'm looking for zones with $70M+ in total spend, 200,000+ yearly transactions, median spend per transaction under $25, and at least 150,000 customers in 2022.",
+    "Thinking of opening a jazz bar — I'm looking for zones with at least $25 million in total spend, median spend per customer below $40, more than 80,000 customers, and year-over-year spend growth over 4% in 2023.",
 ]
 
 hard_2 = [
-    "Looking to start a small movie theater — I’m after zones where the average median spend per customer from 2020 to 2023 was under $40, total spend exceeded $55 million, and the total number of customers was above 120,000 over that period.",
+    "Looking to start a small movie theater — I'm after zones where the average median spend per customer from 2020 to 2023 was under $40, total spend exceeded $55 million, and the total number of customers was above 120,000 over that period.",
     "Scouting a place for a combo coffee/bookshop — I want zones with average year-over-year spend growth of at least 4%, average year-over-year spend increase above 10%, average median spend per transaction under $25, and total transactions over 180,000 from 2019 to 2022.",
     "Thinking about opening a family-owned pizzeria — looking for zones with total spend over $70M, average median spend per customer above $200, total customers over 250,000, and average year-over-year growth over 8% from 2021 through 2023.",
     "I want to set up a community gym — show me zones where the average median spend per transaction was below $20, total spend was at least $60 million, total transactions exceeded 160,000, total customers surpassed 130,000, and average year-over-year spend growth was positive from 2020 to 2023.",
-    "Exploring options for a farmers’ co-op — I’m targeting areas with a total of over 100,000 yearly transactions, total spend above $45M, average median spend per customer ≤ $35, total customer count above 150,000, and both average year-over-year and year-over-year spend growth positive from 2021 to 2024.",
+    "Exploring options for a farmers' co-op — I'm targeting areas with a total of over 100,000 yearly transactions, total spend above $45M, average median spend per customer ≤ $35, total customer count above 150,000, and both average year-over-year and year-over-year spend growth positive from 2021 to 2024.",
     "Planning to open a boba tea shop — looking for zones where total spend exceeded $40 million, and the average median spend per transaction was under $18 from 2021 to 2023.",
-           
 ]
 
 hard_3 = [
@@ -581,7 +352,6 @@ hard_3 = [
     "I want to open a drive-through coffee hut with top category {Gasoline Stations} and sub category {Gasoline Stations with Convenience Stores}, but only if there are fewer than 3 competitors and the total number of transactions is > 500,000 from 2022 - 2024.",
     "I'm thinking of launching a full-service brunch spot with top category {Restaurants and Other Eating Places} and sub category {Full-Service Restaurants}, in zones with fewer than 4 competitors, total spend > $60 million and total number of transactions > 400,000 from 2022 - 2024.",
     "Looking to open a sleek salon with top category {Personal Care Services} and sub category {Beauty Salons}, where there are fewer than 3 competing salons and total customers exceed 200,000 and total spend is above $35 million during 2022 to 2024.",
-            
 ]
 
 hard_4 = [
@@ -591,99 +361,87 @@ hard_4 = [
     "I'm thinking of setting up a juice + fitness hybrid with top category {Fitness and Recreational Sports Centers}. Show me zones with fewer than 2 competitors, a minimum of 3 parking lots, and at least 5 POIs in the top category {Fitness and Recreational Sports Centers}.",
     "Planning to open a modern bistro with sub category {Full-Service Restaurants}. I need zones with fewer than 5 competitors, not less than 4 parking lots, and at least 7 POIs in the sub category {Full-Service Restaurants}.",
     "I want to start a wine lounge with top category {Drinking Places (Alcoholic Beverages)}. Show me areas that have fewer than 3 competitors in the same top category, 3+ parking lots, and no fewer than 6 POIs in {Drinking Places (Alcoholic Beverages)}.",
-           
 ]
-
 
 hard_5 = [
     "I want to open a wellness café with sub category {Snack and Nonalcoholic Beverage Bars}. Show me zones with fewer than 3 competitors in the same sub-category, at least 5 subway entrances nearby, and a combined population of at least 15,000 across the zone and 2 neighbors.",
     "Planning a boutique legal office with top category {Legal Services}. I need zones that have fewer than 4 competitors in the same top category, 4 or more bus stops nearby, and a total population of at least 18,000 with the zone and 3 surrounding zones combined.",
     "Looking to open a tutoring center with sub category {Exam Preparation and Tutoring}. I want zones with fewer than 2 competitors, 3+ nearby stations, and a minimum population of 12,000 across the zone and its 2 nearest neighbors.",
-    "I’m launching a restaurant incubator with top category {Restaurants and Other Eating Places}. I need zones with fewer than 5 competitors, 6 or more bus stops nearby, and a combined population of atleast 20,000 with 2 neighbors.",
+    "I'm launching a restaurant incubator with top category {Restaurants and Other Eating Places}. I need zones with fewer than 5 competitors, 6 or more bus stops nearby, and a combined population of atleast 20,000 with 2 neighbors.",
     "Thinking of opening a co-working hub with top category {Offices of Real Estate Agents and Brokers}. Show me zones with fewer than 3 competitors, at least 4 nearby subway entrances, and a population over atleast 14,000 across 2 closest zones.",
     "I want to set up a day spa with sub category {Beauty Salons}. The zone must have fewer than 4 competitors, 5 taxi stops nearby, and a combined population with 3 neighbors of at least 16,000.",
-            
 ]
 
 hard_6 = [
-    "I want to open a boutique clothing store with sub category {Women's Clothing Stores}. Show me zones with fewer than 3 competitors, a combined population of at least 12,000 with 2 nearby zones, but NOT zones with more than 2 parking lots — I’m targeting a pedestrian-heavy shopping area.",
+    "I want to open a boutique clothing store with sub category {Women's Clothing Stores}. Show me zones with fewer than 3 competitors, a combined population of at least 12,000 with 2 nearby zones, but NOT zones with more than 2 parking lots — I'm targeting a pedestrian-heavy shopping area.",
     "Planning a walk-in hair studio with sub category {Beauty Salons}. I need fewer than 4 competitors, 10,000+ residents in the surrounding area, but I want zones with minimal car traffic — NOT more than 1 parking lot.",
     "Launching a luxury watch boutique with top category {Other Miscellaneous Store Retailers}. I want zones with fewer than 2 competitors, a population over 15,000 with neighbors, but NOT any place with 3 or more parking lots — aiming for high-foot-traffic districts.",
     "I'm scouting zones to open a zero-waste beauty shop with sub category {Other Personal Care Services}. I want fewer than 2 competitors, at least 11,000 nearby residents, but NOT zones with more than 2 parking lots — I prefer pedestrian access.",
     "Looking to open a handmade goods studio with top category {Other Schools and Instruction}. Show me zones with fewer than 3 similar shops, over 10,000 population including two neighbors, but NOT zones filled with large parking lots.",
     "Opening a holistic wellness center with sub category {Other Personal Care Services}. I want fewer than 2 competitors and a combined population of 13,000+ — but avoid zones with more than 2 parking lots.",
-            
-
 ]
 
 hard_7 = [
-    "I'm planning to open a vegan café. Show me zones where there are at least 3 parking lots AND fewer than 2 competitors in sub category {Snack and Nonalcoholic Beverage Bars}, OR zones where the population of my zone and 2 neighbors exceeds 14,000 AND the number of POIs in sub category {Full-Service Restaurants} is not more than 3 — I don’t want areas already saturated with sit-down dining.",
-    "Planning a food truck plaza. I want zones with 3 or more parking lots AND 6+ POIs in sub category {Snack and Nonalcoholic Beverage Bars}, OR zones with fewer than 2 competitors in the same sub category AND NOT more than 3 POIs in sub category {Drinking Places (Alcoholic Beverages)} — this isn’t a nightlife spot.",
+    "I'm planning to open a vegan café. Show me zones where there are at least 3 parking lots AND fewer than 2 competitors in sub category {Snack and Nonalcoholic Beverage Bars}, OR zones where the population of my zone and 2 neighbors exceeds 14,000 AND the number of POIs in sub category {Full-Service Restaurants} is not more than 3 — I don't want areas already saturated with sit-down dining.",
+    "Planning a food truck plaza. I want zones with 3 or more parking lots AND 6+ POIs in sub category {Snack and Nonalcoholic Beverage Bars}, OR zones with fewer than 2 competitors in the same sub category AND NOT more than 3 POIs in sub category {Drinking Places (Alcoholic Beverages)} — this isn't a nightlife spot.",
     "I want to open a boutique wine bar with sub category {Drinking Places (Alcoholic Beverages)}. Show me zones with 4 or more POIs in the sub category AND fewer than 3 competitors, OR zones with 3+ parking lots AND NOT a total population above 15,000 — targeting suburban charm, not urban density.",
     "I'm opening a rustic bakery. Show me zones with at least 2 parking lots AND fewer than 2 competitors in sub category {Snack and Nonalcoholic Beverage Bars}, OR zones where population with 2 nearby zones is over 12,000 AND NOT more than 3 POIs in sub category {Full-Service Restaurants}.",
     "Looking to set up a community art studio. I want zones with 3 or more parking lots AND fewer than 3 competitors in top category {Other Miscellaneous Store Retailers}, OR zones with 11,000+ residents across 2 neighbors AND NOT more than 4 POIs in sub category {Drinking Places (Alcoholic Beverages)}.",
     "Planning a cozy reading café. Find zones with at least 3 parking lots AND fewer than 2 competitors in sub category {Snack and Nonalcoholic Beverage Bars}, OR zones with 13,000+ people and NOT more than 3 POIs in top category {Restaurants and Other Eating Places}.",
-            
 ]
 
 hard_8 = [
-    "I’m opening a career coaching office with sub category {Educational Support Services}. I want zones with fewer than 2 competitors AND at least 4 POIs in that sub category, OR zones with 4+ nearby bus stops AND NOT more than 2 parking lots — I’m aiming for foot-traffic-heavy academic districts.",
+    "I'm opening a career coaching office with sub category {Educational Support Services}. I want zones with fewer than 2 competitors AND at least 4 POIs in that sub category, OR zones with 4+ nearby bus stops AND NOT more than 2 parking lots — I'm aiming for foot-traffic-heavy academic districts.",
     "Planning a legal clinic with top category {Legal Services}. Find me zones that have under 3 competitors AND at least 5 POIs in the same top category, OR 5 or more subway entrances nearby AND NOT more than 2 parking lots — walkability is key.",
     "I want to launch a pop-up vegan dessert bar with sub category {Snack and Nonalcoholic Beverage Bars}. Target zones that have fewer than 3 competitors AND 6+ POIs, OR strong access with 4+ taxi stands AND NOT more than 1 parking lot — aiming for small-format urban placement.",
     "Looking to open a college-focused tutoring hub with sub category {Exam Preparation and Tutoring}. Show me zones that have fewer than 2 competitors AND 4 or more POIs, OR 4 bus stops nearby AND NOT zones with 3 or more parking lots.",
-    "Opening a mindfulness coaching center with sub category {Other Personal Care Services}. I want zones that have at least 5 POIs AND fewer than 3 competitors, OR access to 5+ subway entrances AND NOT more than 2 parking lots — we’re trying to embed in walkable communities.",
+    "Opening a mindfulness coaching center with sub category {Other Personal Care Services}. I want zones that have at least 5 POIs AND fewer than 3 competitors, OR access to 5+ subway entrances AND NOT more than 2 parking lots — we're trying to embed in walkable communities.",
     "Scouting zones for a family law firm with top category {Legal Services}. I want zones that include fewer than 3 competitors AND 5 POIs, OR zones with great access — 4 taxi stands minimum — and NOT more than 2 parking lots.",
-            
 ]
 
 hard_9 = [
-    "I want to open a wellness studio. I’m looking for zones with fewer than 3 competitors in sub category {Other Personal Care Services} OR a population of at least 12,000 across 2 neighboring zones, but NOT zones with more than 2 parking lots — we’re targeting walkable areas.",
+    "I want to open a wellness studio. I'm looking for zones with fewer than 3 competitors in sub category {Other Personal Care Services} OR a population of at least 12,000 across 2 neighboring zones, but NOT zones with more than 2 parking lots — we're targeting walkable areas.",
     "Planning a tutoring center. I want zones that either have fewer than 2 competitors in sub category {Exam Preparation and Tutoring} OR population above 13,000 including 2 nearby zones, but NOT areas with 3 or more parking lots — this is a student-heavy district.",
     "Looking to launch a bakery café. I want either fewer than 3 competitors in sub category {Full-Service Restaurants} OR at least 15,000 people in this zone, but NOT zones with heavy parking less than 8— too suburban for my concept.",
-    "I want to open a plant-based diner. Either the zone has fewer than 2 competitors in sub category {Full-Service Restaurants} OR a population over 14,000 across 2 neighbors, but NOT if it has more than 2 parking lots — I’m aiming for pedestrian-heavy areas.",
+    "I want to open a plant-based diner. Either the zone has fewer than 2 competitors in sub category {Full-Service Restaurants} OR a population over 14,000 across 2 neighbors, but NOT if it has more than 2 parking lots — I'm aiming for pedestrian-heavy areas.",
     "Planning a boutique consulting office. I want fewer than 3 competitors in sub category {Legal Services} OR 13,000+ population with the 1 closest neighbor, but NOT zones with 3 or more parking lots.",
-    "Looking to start a children’s learning space. The zone should either have fewer than 2 competitors in sub category {Educational Support Services} OR 15,000+ people near the closest 3 neighboring zones, but NOT with 3+ parking lots.",
-            
+    "Looking to start a children's learning space. The zone should either have fewer than 2 competitors in sub category {Educational Support Services} OR 15,000+ people near the closest 3 neighboring zones, but NOT with 3+ parking lots.",
 ]
 
 hard_10 = [
-    "I’m launching a late-night coffee spot. I want at least 5 POIs in sub category of {Snack and Nonalcoholic Beverage Bars} OR 4+ subway stops nearby, but NOT zones with more than 3 competitors in the same sub category.",
-    "Looking to open a brunch café. Either the zone has 6+ POIs in sub category {Full-Service Restaurants} OR great transport via 5 bus stops, but NOT if 4 or more similar businesses exist.",
-    "I want to open a barbershop. I’m looking for either 5+ POIs in sub category {Beauty Salons} OR at least 4 taxi stops, but NOT more than 3 competitors.",
+    "I'm launching a late-night coffee spot. I want at least 5 POIs in sub category of {Snack and Nonalcoholic Beverage Bars} OR 4+ subway stops nearby, but NOT zones with more than 3 competitors in the same sub category.",
+    "Looking to open a brunch café. Either the zone has 6+ POIs in sub category {Full-Service Restaurants} OR transport greater than 5 bus stops, but NOT if 4 or more similar businesses exist.",
+    "I want to open a barbershop. I'm looking for either 5+ POIs in sub category {Beauty Salons} OR at least 4 taxi stops, but NOT more than 3 competitors.",
     "Launching a boba tea shop. Show me zones with either 6 POIs in sub category {Snack and Nonalcoholic Beverage Bars} OR at least 5 subway entrances, but NOT high local competition.",
     "Planning a craft beer bar. I need zones with either 4 POIs in sub category {Drinking Places} OR 4+ nearby bus stops, but NOT 3+ competitors.",
-    "Opening a dog-friendly juice bar. I want either 5 POIs in sub category {Snack and Nonalcoholic Beverage Bars} OR strong public transit, but NOT zones where competition is too high.",
-            
+    "Opening a dog-friendly juice bar. I want either 5 POIs in sub category {Snack and Nonalcoholic Beverage Bars} OR strong public transit, but NOT zones where competition is higher than 3 competitors.",
 ]
 
 hard_11 = [
     "I'm planning a co-working café. I want zones with at least 14,000 people across my zone and 2 neighbors OR at least 4 subway entrances, but NOT zones where the nearest station is more than 300 meters away — we need direct transit access.",
     "Opening a night market food stall. I want zones with either 13,000+ population including 3 nearby zones OR 5 bus stops, but NOT zones where the nearest bus stop is more than 250 meters from the centroid.",
-    "I’m looking to set up a fast-casual eatery. The zone should either have strong public transit (5+ stops) OR 12,000+ population with 2 neighbors, but NOT if the nearest subway entrance is beyond walking range of 300 meter from the centroid.",
+    "I'm looking to set up a fast-casual eatery. The zone should either have strong public transit (5+ stops) OR 12,000+ population with 2 neighbors, but NOT if the nearest subway entrance is beyond walking range of 300 meter from the centroid.",
     "I want to open a ramen bar. Either the population across 2 neighboring zones is 14,000+ OR the zone has 5+ subway stops, but NOT if the nearest station is more than 300 meters from the centroid.",
     "Launching a career development center. I want zones with either high population density of 10,000+ or 4+ transit access points, but NOT where the walk to a stop exceeds 250 meters.",
     "Looking to open a legal services center. I want either 15,000+ people at this zone OR 5 nearby transit stops, but NOT long walking distances — under 200 meters only.",
-           
 ]
 
 hard_12 = [
-    "Looking to open a drive-in diner. I want zones with at least 4 parking lots OR 6+ POIs in sub category {Full-Service Restaurants}, but NOT ones where the combined population across my zone and 2 neighbors exceeds 12,000 — I’m avoiding congested urban cores.",
-    "Planning a car-based grocery pickup center. Either I need 5 parking lots OR 5+ POIs in  sub category {Snack and Nonalcoholic Beverage Bars}, but NOT if the surrounding population  across my zone and 4 neighbors exceeds 14,000 — I’m focused on suburban delivery hubs.",
+    "Looking to open a drive-in diner. I want zones with at least 4 parking lots OR 6+ POIs in sub category {Full-Service Restaurants}, but NOT ones where the combined population across my zone and 2 neighbors exceeds 12,000 — I'm avoiding congested urban cores.",
+    "Planning a car-based grocery pickup center. Either I need 5 parking lots OR 5+ POIs in  sub category {Snack and Nonalcoholic Beverage Bars}, but NOT if the surrounding population  across my zone and 4 neighbors exceeds 14,000 — I'm focused on suburban delivery hubs.",
     "I'm opening an automotive service hub. I want 3 or more parking lots OR 4+ POIs in  sub category {Automotive Parts, Accessories, and Tire Stores}, but NOT zones with 15,000+ people — lower density is key for this model.",
     "I'm opening a drive-in movie café. I want zones with at least 4 parking lots OR 5 POIs in  sub category {Snack and Nonalcoholic Beverage Bars}, but NOT where population with 2 neighbors exceeds 12,000 — this is a low-density format.",
     "Launching an outdoor food court. I want zones with 5 parking lots OR 6 POIs in  sub category {Full-Service Restaurants}, but NOT zones with 14,000+ residents.",
     "Scouting a retail garden supply store. I need 3+ parking lots OR 5 POIs in  top category {Other Miscellaneous Store Retailers}, but NOT if the surrounding population across 5 closest zones is dense, should not exceed 25,000",
-            
 ]
 
 hard_13 = [
     "Planning to open a neighborhood bank. Either the zone has 4 or more transport modes and 14,000+ people in 2 neighbors plus itself, OR there are fewer than 2 competitors in sub category {Commercial Banking} AND NOT more than 3 POIs in that space.",
     "Looking for a spot to open a boutique law office — give me zones with 3 or more transportation types AND at least 12,000 residents in 2 zones plus itself, OR areas with less than 2 competitors in sub category {Offices of Lawyers} AND NOT more than 2 POIs in that sub category.",
-    "I'm launching a real estate satellite office. I want either zones with 3 types of transportation and 13,000+ with one closest nearby zone residents, OR areas with under 3 competitors in sub category {Offices of Real Estate Agents and Brokers} AND NOT more than POIs in that sub category.",
+    "I'm launching a real estate satellite office. I want either zones with 3 types of transportation and 13,000+ with one closest nearby zone residents, OR areas with under 3 competitors in sub category {Offices of Real Estate Agents and Brokers} AND NOT more than 3 POIs in that sub category.",
     "Hunting for a zone to open a mental health center. Show me zones with at least 3 distinct transportation types AND atleast 14,000 people with its closest neighbor, OR fewer than 2 competitors in sub category {Offices of Physicians, Mental Health Specialists} AND NOT zones with 4+ POIs in that sub category.",
     "I want to build a small creative studio — give me zones with at least 3 types of transport AND population above 12,000 with 2 neighboring zones, OR areas with fewer than 3 competitors in sub category {Advertising Agencies} AND NOT more than 2 POIs in that sub category.",
     "I'm planning a satellite insurance branch. Either the zone has 4 transportation types and 13,000+ people with closest 2 neighbors, OR fewer than 2 competitors in sub category {Insurance Agencies and Brokerages} AND NOT 3+ POIs in that category.",
-            
 ]
 
 hard_14 = [
@@ -693,7 +451,6 @@ hard_14 = [
     "Trying to open a walk-in tutoring center — show me zones with 4 or more POIs in sub categories {Exam Preparation and Tutoring} and {Elementary and Secondary Schools} AND NOT zones with more than 2 parking lots, OR areas with 5 POIs in sub category {Educational Support Services} and at least 4 taxi stands.",
     "Planning a nightlife spot. I need zones with 5+ POIs in sub categories {Drinking Places (Alcoholic Beverages)} and {Snack and Nonalcoholic Beverage Bars} AND NOT zones with 3 or more parking lots, OR at least 4 POIs in sub category {Beer, Wine, and Liquor Stores} and 3 nearby stations.",
     "I'm scouting for a food + drink plaza — either zones with at least 6 POIs from sub categories {Snack and Nonalcoholic Beverage Bars} and {Full-Service Restaurants} AND NOT more than 2 parking lots, OR areas with 4 POIs in sub category {Drinking Places (Alcoholic Beverages)} and at least 5 subway entrances.",
-            
 ]
 
 hard_15 = [
@@ -703,17 +460,15 @@ hard_15 = [
     "Launching a plant-based café — I want under 3 competitors in sub category {Full-Service Restaurants}, at least 14,000 residents across my zone and 2 neighbors, NOT more than 2 parking lots, and total customer count from 2021 to 2024 must exceed 200,000.",
     "Seeking zones to open a home fragrance studio in sub category {All Other Home Furnishings Stores}. I need fewer than 2 competitors, 12,000+ residents in this zone, NOT more than 2 parking lots, and raw total spend above $40M from 2019–2022.",
     "I want to open a book café under sub category {Snack and Nonalcoholic Beverage Bars}. The zone must have fewer than 4 competitors, over 10,000 total population including 2 neighbors, NOT more than 2 parking lots, and average median spend per transaction > $22 from 2020 to 2023.",
-            
 ]
 
 hard_16 = [
-    "Looking to launch a creative co-working café — needs at least 26 POIs AND strong local spending, like 50%+ from sub-category of {Full-Service Restaurants} in 2022, but I’m not interested if that same category dominates the area by 30%.",
-    "For my next wellness studio, the perfect zone needs 35+ POIs and a strong sub category {Beauty Salons} spend — over 40% in 2023. But don’t show me places where that category makes up more than 30% of POIs. Too much is too much.",
+    "Looking to launch a creative co-working café — needs at least 26 POIs AND strong local spending, like 50%+ from sub-category of {Full-Service Restaurants} in 2022, but I'm not interested if that same category dominates the area by 30%.",
+    "For my next wellness studio, the perfect zone needs 35+ POIs and a strong sub category {Beauty Salons} spend — over 40% in 2023. But don't show me places where that category makes up more than 30% of POIs. Too much is too much.",
     "I'm opening a wellness hub and want a zone with at least 37 POIs, and more than 50% of total spending in 2019 should come from sub category {Educational Support Services}, but skip it if that category takes up more than 25% of all POIs — we need variety.",
-    "I'm scouting a neighborhood for a family café. I want at least 39 POIs in the zone, and over 40% of spending in 2021 should come from sub category {Beauty Salons}, but it shouldn’t be overrun — cap that category at 30% of total POIs.",
-    "I’m planning a boutique gym — give me a spot with at least 21 businesses, where folks spend at least 60% of their money in 2024 on sub category {Offices of Dentists}, but I’ll pass if that’s more than 30% of what's actually there.",
-    "Looking to launch a creative co-working café — needs at least 45 POIs AND strong local spending, like 50%+ from sub category of {Snack and Nonalcoholic Beverage Bars} in 2020, but I’m not interested if that same category dominates the area (>25% of POIs).",
-            
+    "I'm scouting a neighborhood for a family café. I want at least 39 POIs in the zone, and over 40% of spending in 2021 should come from sub category {Beauty Salons}, but it shouldn't be overrun — cap that category at 30% of total POIs.",
+    "I'm planning a boutique gym — give me a spot with at least 21 businesses, where folks spend at least 60% of their money in 2024 on sub category {Offices of Dentists}, but I'll pass if that's more than 30% of what's actually there.",
+    "Looking to launch a creative co-working café — needs at least 45 POIs AND strong local spending, like 50%+ from sub category of {Snack and Nonalcoholic Beverage Bars} in 2020, but I'm not interested if that same category dominates the area (>25% of POIs).",
 ]
 
 hard_17 = [
@@ -723,15 +478,4 @@ hard_17 = [
     "I'm looking for one of two scenarios: either the area is dominated by sub category {Beauty Salons}, or top category {Educational Support Services} gets over 70% of spend in 2020. But if {Educational Support Services} also takes up more than 40% of POIs, it's a no-go for me.",
     "For my new project, I'm okay with areas where sub category {Jewelry Stores} leads in POI count, or top category {Legal Services} owns at least 50% of 2022's spend. Just avoid places where {Legal Services} overwhelms more than 40% of businesses.",
     "For my new project, I'm okay with areas where sub category {Other Automotive Mechanical and Electrical Repair and Maintenance} leads in POI count, or top category {Lessors of Real Estate} owns at least 40% of 2024's spend. Just avoid places where {Lessors of Real Estate} overwhelms more than 35% of businesses.",
-    
 ]
-
-if __name__ == "__main__":
-    for i in range(1, 19):
-        prep(eval(f"simple_{i}"), "sim", i)
-    for i in range(1, 17):
-        prep(eval(f"medium_{i}"), "med", i)
-    for i in range(1, 18):            
-        prep(eval(f"hard_{i}"), "hard", i)
-    
- 

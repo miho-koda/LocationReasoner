@@ -8,9 +8,9 @@ import dotenv
 from typing import List, Dict, Any
 from langchain.chat_models import ChatOpenAI
 from langchain.schema import HumanMessage
-from prompt import (
+from .prompt import (
     ZEROSHOT_REACT_INSTRUCTION,
-    REFLECTION_INSTRUCTION, 
+    REFLECTION_INSTRUCTION,
     REFLECTION_HEADER,
 
 )

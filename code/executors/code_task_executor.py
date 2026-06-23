@@ -9,9 +9,10 @@ import geopandas as gpd
 import inspect
 # Constants
 
-
 import json
 
+# Ensure code/ root is on path so existing imports resolve
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config_utils import load_config
 
@@ -340,7 +341,7 @@ try:
     from site_selection.analysis import get_spendparam_years, get_num_parking, get_largest_parking_lot_area, get_largest_parking_capacity, get_distance_km
     from site_selection.filter import filter_df_based_on_zone, filter_pois_by_top_category, filter_pois_by_sub_category, get_transport_pois_in_zone
     from site_selection.population import get_population
-    from prompt import dataframe_documentation, in_house_functions_documentation
+    from core.prompt import dataframe_documentation, in_house_functions_documentation
     print("Successfully imported all required modules")
 except ImportError as e:
     print("Import error:", e)
@@ -994,8 +995,8 @@ hard_17 = [
 ####################################################TEST CASE ####################################################
 
 
-from router import router
-from prompt import user_prompt_short
+from core.router import router
+from core.prompt import user_prompt_short
 
 routers_and_models = [
     (router, 'claude3haiku'), 
@@ -1015,15 +1016,16 @@ def run_all_prompts(prompts, output_path, router_fn, llm_name, prompt_v2 = False
     for x, prompt_text in enumerate(prompts):
         run_single_prompt(prompt_text, output_path, router_fn, llm_name, x, prompt_v2)
 
-for router_function, model_id in routers_and_models:
-    # Simple prompts
-    for i in range(1, 19):            
-        run_all_prompts(eval(f"simple_{i}"), os.path.join(RESULT_ROOT, SIMPLE_DIR, str(i)), router_function, model_id)
-    
-    # Medium prompts
-    for i in range(1, 17):
-        run_all_prompts(eval(f"medium_{i}"), os.path.join(RESULT_ROOT, MEDIUM_DIR, str(i)), router_function, model_id)
-    
-    # Hard prompts
-    for i in range(1, 18):
-        run_all_prompts(eval(f"hard_{i}"), os.path.join(RESULT_ROOT, HARD_DIR, str(i)), router_function, model_id)
+if __name__ == "__main__":
+    for router_function, model_id in routers_and_models:
+        # Simple prompts
+        for i in range(1, 19):
+            run_all_prompts(eval(f"simple_{i}"), os.path.join(RESULT_ROOT, SIMPLE_DIR, str(i)), router_function, model_id)
+
+        # Medium prompts
+        for i in range(1, 17):
+            run_all_prompts(eval(f"medium_{i}"), os.path.join(RESULT_ROOT, MEDIUM_DIR, str(i)), router_function, model_id)
+
+        # Hard prompts
+        for i in range(1, 18):
+            run_all_prompts(eval(f"hard_{i}"), os.path.join(RESULT_ROOT, HARD_DIR, str(i)), router_function, model_id)

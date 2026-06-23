@@ -27,7 +27,7 @@ import sys
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-import prompt
+from . import prompt
 dataframe_documentation = prompt.dataframe_documentation
 in_house_functions_documentation = prompt.in_house_functions_documentation
 
